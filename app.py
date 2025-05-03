@@ -26,44 +26,49 @@ def get_app_context_data():
     return app.app_context()
 
 def get_all_items_raw():
-    """Get all items using raw SQL with engine.execute"""
-    result = engine.execute('SELECT id, name FROM item')
-    items = [{'id': row[0], 'name': row[1]} for row in result]
+    """Get all items using raw SQL with connection-based execution"""
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT id, name FROM item'))
+        items = [{'id': row[0], 'name': row[1]} for row in result]
     return items
 
 def get_item_by_id_raw(item_id):
-    """Get a specific item using raw SQL with engine.execute"""
-    result = engine.execute(text('SELECT id, name FROM item WHERE id = :id'), {'id': item_id})
-    row = result.first()
+    """Get a specific item using raw SQL with connection-based execution"""
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT id, name FROM item WHERE id = :id'), {'id': item_id})
+        row = result.first()
     if row is None:
         return None
     return {'id': row[0], 'name': row[1]}
 
 def create_item_raw(item_data):
-    """Create a new item using raw SQL with engine.execute"""
-    result = engine.execute(
-        text('INSERT INTO item (id, name) VALUES (:id, :name)'),
-        {'id': item_data.get('id'), 'name': item_data.get('name')}
-    )
+    """Create a new item using raw SQL with connection-based execution"""
+    with engine.begin() as conn:
+        conn.execute(
+            text('INSERT INTO item (id, name) VALUES (:id, :name)'),
+            {'id': item_data.get('id'), 'name': item_data.get('name')}
+        )
     return item_data
+
 
 class ItemsView(views.MethodView):
     def get(self):
-        # Using engine.execute instead of ORM
+        # Using connection-based execution instead of ORM
         items = get_all_items_raw()
         return jsonify(items)
     
     def post(self):
         new_item = json.loads(request.data)
-        # Using engine.execute for insert
+        # Using connection-based execution for insert
         create_item_raw(new_item)
         return jsonify(new_item), 201
 
 app.add_url_rule('/api/items', view_func=ItemsView.as_view('items_api'), methods=['GET', 'POST'])
 
+
 @app.route('/api/items/<int:item_id>')
 def get_item(item_id):
-    # Using engine.execute to fetch the item
+    # Using connection-based execution to fetch the item
     item_dict = get_item_by_id_raw(item_id)
     
     if not item_dict:
@@ -80,42 +85,49 @@ def get_item(item_id):
         mimetype='application/json'
     )
 
+
 @app.route('/api/items/bulk', methods=['POST'])
 def bulk_create_items():
-    """Bulk create items using engine.execute"""
+    """Bulk create items using connection-based execution"""
     items_data = request.json
     
     # Create a list of dictionaries for bulk insert
     items_to_insert = [{'id': item['id'], 'name': item['name']} for item in items_data]
     
-    # Use executemany for bulk operations
-    engine.execute(
-        text('INSERT INTO item (id, name) VALUES (:id, :name)'),
-        items_to_insert
-    )
+    # Use executemany for bulk operations within a transaction block
+    with engine.begin() as conn:
+        conn.execute(
+            text('INSERT INTO item (id, name) VALUES (:id, :name)'),
+            items_to_insert
+        )
     
     return jsonify({"message": f"Created {len(items_data)} items"}), 201
+
 
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'error': 'Not found'}), 404
 
+
 # Seed the database with initial data
+
 def seed_database():
-    # Check if we already have items using engine.execute
-    result = engine.execute('SELECT COUNT(*) FROM item')
-    count = result.scalar()
+    # Check if we already have items using connection-based execution
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT COUNT(*) FROM item'))
+        count = result.scalar()
     
     if count == 0:
-        # Insert seed data using engine.execute
-        engine.execute(
-            text('INSERT INTO item (id, name) VALUES (:id, :name)'),
-            [
-                {'id': 1, 'name': 'Item 1'},
-                {'id': 2, 'name': 'Item 2'},
-                {'id': 3, 'name': 'Item 3'}
-            ]
-        )
+        # Insert seed data using connection-based execution
+        with engine.begin() as conn:
+            conn.execute(
+                text('INSERT INTO item (id, name) VALUES (:id, :name)'),
+                [
+                    {'id': 1, 'name': 'Item 1'},
+                    {'id': 2, 'name': 'Item 2'},
+                    {'id': 3, 'name': 'Item 3'}
+                ]
+            )
 
 
 if __name__ == '__main__':
